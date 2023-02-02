@@ -6,6 +6,8 @@ local paths <const> = {home = utils.get_appdata_path("PopstarDevs", "2Take1Menu"
 paths.kek_menu_stuff = paths.home.."scripts\\kek_menu_stuff\\"
 paths.language_ini = paths.kek_menu_stuff.."kekMenuLibs\\Languages\\language.ini"
 
+assert(utils.dir_exists(paths.kek_menu_stuff.."kekMenuLibs\\Languages"), paths.kek_menu_stuff.."kekMenuLibs\\Languages folder, doesn't exist.")
+
 do
 	if utils.file_exists(paths.language_ini) then
 		local file <const> = io.open(paths.language_ini)
@@ -19,6 +21,7 @@ end
 
 if not utils.file_exists(paths.language_ini) then
 	local file = io.open(paths.language_ini, "w+")
+	assert(file, "Missing write permissions to:\n"..paths.language_ini)
 	file:write("English.txt")
 	file:flush()
 	file:close()
@@ -72,6 +75,7 @@ do
 		local translation = table.concat(sentences)
 		translation = translation:gsub("\\u(%x%x%x%x)", unicode_escape) -- THIS MUST BE DONE BEFORE BACKSLASH ESCAPE.
 		translation = translation:gsub(" <code> 0 </code> ", "\n")
+		translation = translation:gsub("<code>0</code>", "\n")
 		translation = translation:gsub("\\(.)", "%1")
 		return translation, detected_language
 	end

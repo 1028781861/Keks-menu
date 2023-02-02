@@ -1,7 +1,7 @@
 -- Copyright © 2020-2022 Kektram
 
 return {
-	version = "1.0.5",
+	version = "1.0.6",
 	supported_langs_by_google_to_code = {
 		["Afrikaans"] = "af",
 		["Albanian"] = "sq",
@@ -784,7 +784,10 @@ return {
 		STUNGRENADE = 79,
 		_0x763D3B3B = 80,
 		SCRIPT_MISSILE_LARGE = 81,
-		SUBMARINE_BIG = 82
+		SUBMARINE_BIG = 82,
+		EMPLAUNCHER_EMP = 83,
+		RAILGUNXM3 = 84
+
 	},
 	combat_attributes = {
 		CanUseCover = 0,
@@ -1765,6 +1768,14 @@ return {
 		ACTIVATE_VEHICLE_SPECIAL_ABILITY_EVENT = 85,
 		BLOCK_WEAPON_SELECTION = 86,
 		NETWORK_CHECK_CATALOG_CRC = 87
+	},
+	paint_types = {
+		normal = 0,
+		metallic = 1,
+		pearl = 2,
+		matte = 3,
+		metal = 4,
+		chrome = 5
 	},
 	vehicle_colors = {
 		[0] = "Metallic Black",

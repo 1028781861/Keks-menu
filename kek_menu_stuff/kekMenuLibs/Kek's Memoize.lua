@@ -35,16 +35,16 @@ do
 	local sign_bit_x <const> = 1 << 62
 	local sign_bit_y <const> = 1 << 61
 	local sign_bit_z <const> = 1 << 60
-	local max_20_bit_num <const> = 1048475 
-	local v3 <const> = v3
+	local max_20_bit_num <const> = 1048475 -- 10484 is the max number a coord can be
+	local v3 <const> = v3 -- If it's bigger than max, it won't memoize.
 	local memoized <const> = {}
-	function memoize.v3(x, y, z)
+	function memoize.v3(x, y, z) -- smallest to differentiate between: 0.1 {v3(0.1, 0.1, 0.1)}
 		x = x or 0
 		y = y or 0
 		z = z or 0
-		local xi = x * 100 // 1
-		local yi = y * 100 // 1
-		local zi = z * 100 // 1
+		local xi = x * 10^2 // 1 -- Can differentiate between numbers this small: 10^-(exponent - 1)
+		local yi = y * 10^2 // 1 -- Biggest number you can store becomes smaller the more fractional precision you desire.
+		local zi = z * 10^2 // 1
 		if xi >= -max_20_bit_num 
 		and xi <= max_20_bit_num 
 		and yi >= -max_20_bit_num 
@@ -64,9 +64,9 @@ do
 				zi = zi * -1
 				signs = signs | sign_bit_z
 			end
-			local hash <const> = signs | xi << 40 | yi << 20 | zi
-			memoized[hash] = memoized[hash] or v3(x, y, z)
-			return memoized[hash]
+			local packed_numbers <const> = signs | xi << 40 | yi << 20 | zi
+			memoized[packed_numbers] = memoized[packed_numbers] or v3(x, y, z)
+			return memoized[packed_numbers]
 		else
 			return v3(x, y, z)
 		end
@@ -76,14 +76,14 @@ end
 do
 	local sign_bit_x <const> = 1 << 62
 	local sign_bit_y <const> = 1 << 61
-	local max_30_bit_num <const> = 1073740823
-	local v2 <const> = v2
+	local max_30_bit_num <const> = 1073740823 -- 10737 is the max number a coord can be
+	local v2 <const> = v2 -- If it's bigger than max, it won't memoize.
 	local memoized <const> = {}
-	function memoize.v2(x, y)
+	function memoize.v2(x, y) -- smallest to differentiate between: 0.0001 {v2(0.0001, 0.0001)}
 		x = x or 0
 		y = y or 0
-		local xi = x * 1000 // 1
-		local yi = y * 1000 // 1
+		local xi = x * 10^5 // 1 -- Can differentiate between numbers this small: 10^-(exponent - 1)
+		local yi = y * 10^5 // 1 -- Biggest number you can store becomes smaller the more fractional precision you desire.
 		if xi >= -max_30_bit_num 
 		and xi <= max_30_bit_num 
 		and yi >= -max_30_bit_num 
@@ -97,9 +97,9 @@ do
 				yi = yi * -1
 				signs = signs | sign_bit_y
 			end
-			local hash <const> = signs | xi << 30 | yi
-			memoized[hash] = memoized[hash] or v2(x, y)
-			return memoized[hash]
+			local packed_numbers <const> = signs | xi << 30 | yi
+			memoized[packed_numbers] = memoized[packed_numbers] or v2(x, y)
+			return memoized[packed_numbers]
 		else
 			return v2(x, y)
 		end
@@ -157,13 +157,13 @@ do
 	function memoize.get_distance_between(entity_or_position_1, entity_or_position_2, e1, e2, memoize_time)
 		local type1 <const> = math.type(entity_or_position_1) == "integer"
 		local type2 <const> = math.type(entity_or_position_2) == "integer"
-		local hash
+		local packed_numbers
 		if (type1 and type2) or e1 or e2 then
 			e1 = e1 or entity_or_position_1
 			e2 = e2 or entity_or_position_2
-			hash = 0 | e1 << 30 | e2
-			if memoized[hash] and memoized[hash].time > utils.time_ms() then
-				return memoized[hash].magnitude
+			packed_numbers = 0 | e1 << 30 | e2
+			if memoized[packed_numbers] and memoized[packed_numbers].time > utils.time_ms() then
+				return memoized[packed_numbers].magnitude
 			end
 		end
 		if type1 then
@@ -173,10 +173,10 @@ do
 			entity_or_position_2 = entity.get_entity_coords(entity_or_position_2)
 		end
 		local magnitude <const> = entity_or_position_1:magnitude(entity_or_position_2)
-		if hash then
-			memoized[hash] = memoized[hash] or {}
-			memoized[hash].magnitude = magnitude
-			memoized[hash].time = utils.time_ms() + math.ceil((memoize_time or 20) * 1000 * math.min(gameplay.get_frame_time(), 0.03))
+		if packed_numbers then
+			memoized[packed_numbers] = memoized[packed_numbers] or {}
+			memoized[packed_numbers].magnitude = magnitude
+			memoized[packed_numbers].time = utils.time_ms() + math.ceil((memoize_time or 20) * 1000 * math.min(gameplay.get_frame_time(), 0.03))
 		end
 		return magnitude
 	end

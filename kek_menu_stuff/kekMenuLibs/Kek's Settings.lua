@@ -2,8 +2,7 @@
 
 local settings <const> = {version = "1.0.2"}
 
-local language <const> = require("Kek's Language")
-local lang <const> = language.lang
+local lang <const> = require("Kek's Language").lang
 
 local paths <const> = {home = utils.get_appdata_path("PopstarDevs", "2Take1Menu").."\\"}
 paths.kek_menu_stuff = paths.home.."scripts\\kek_menu_stuff\\"
@@ -84,9 +83,11 @@ function settings:initialize(...)
 		end
 		self.in_use[name] = setting
 	end
+
 	local file = io.open(file_path, "a+")
+	assert(io.type(file) == "file", "Failed to open settings file.")
 	file:setvbuf("full")
-	assert(io.type(file) == "file", debug.traceback("Failed to open settings file.", 2))
+
 	for setting_name, default in pairs(self.default) do
 		if self.in_use[setting_name] == nil then
 			self.in_use[setting_name] = default

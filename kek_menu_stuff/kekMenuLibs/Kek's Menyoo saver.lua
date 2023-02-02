@@ -2,11 +2,9 @@
 
 local essentials <const> = require("Kek's Essentials")
 local kek_entity <const> = require("Kek's Entity functions")
-local enums <const> = require("Kek's Enums")
 local memoize <const> = require("Kek's Memoize")
 local settings <const> = require("Kek's Settings")
-local language <const> = require("Kek's Language")
-local lang <const> = language.lang
+local lang <const> = require("Kek's Language").lang
 
 local menyoo_saver <const> = {version = "1.0.9"}
 
@@ -31,7 +29,7 @@ local function get_properties(...)
 		IsDrownProof = entity_proofs.drown,
 		IsSteamProof = entity_proofs.steam,
 		Dynamic = true,
-		FrozenPos = false
+		FrozenPos = kek_entity.is_entity_frozen(Entity)
 	}
 	if entity.is_entity_a_ped(Entity) then
 		info.Type = 1
@@ -91,9 +89,9 @@ local function get_properties(...)
 			info.PedProperties.PedComps["_"..i] = string.format("%i,%i", ped.get_ped_texture_variation(Entity, i), ped.get_ped_drawable_variation(Entity, i))
 		end
 	elseif entity.is_entity_a_vehicle(Entity) then
-		local Cust1_R <const>, Cust1_G <const>, Cust1_B <const> = essentials.rgb_to_bytes(vehicle.get_vehicle_custom_primary_colour(Entity))
-		local Cust2_R <const>, Cust2_G <const>, Cust2_B <const> = essentials.rgb_to_bytes(vehicle.get_vehicle_custom_secondary_colour(Entity))
-		local neon_r <const>, neon_g <const>, neon_b <const> = essentials.rgb_to_bytes(vehicle.get_vehicle_neon_lights_color(Entity))
+		local Cust1_R <const>, Cust1_G <const>, Cust1_B <const> = vehicle.get_vehicle_custom_primary_colour__native(Entity)
+		local Cust2_R <const>, Cust2_G <const>, Cust2_B <const> = vehicle.get_vehicle_custom_secondary_colour__native(Entity)
+		local neon_r <const>, neon_g <const>, neon_b <const> = vehicle.get_vehicle_neon_colour(Entity)
 		local smoke_r <const>, smoke_g <const>, smoke_b <const> = vehicle.get_vehicle_tyre_smoke_color(Entity)
 		info.VehicleProperties = {
 			Colours = {
@@ -148,6 +146,14 @@ local function get_properties(...)
 			}),
 			Mods = {}
 		}
+
+		info.VehicleProperties.Colours.Mod1_a, 
+		info.VehicleProperties.Colours.Mod1_b, 
+		info.VehicleProperties.Colours.Mod1_c = vehicle.get_vehicle_mod_color_1(Entity)
+
+		info.VehicleProperties.Colours.Mod2_a, 
+		info.VehicleProperties.Colours.Mod2_b = vehicle.get_vehicle_mod_color_2(Entity)
+
 		for i = 1, 20 do
 			if vehicle.does_extra_exist(Entity, i) then 
 				info.VehicleProperties.ModExtras["_"..i] = vehicle.is_vehicle_extra_turned_on(Entity, i)
@@ -183,7 +189,7 @@ local function get_properties(...)
 		end
 	elseif entity.is_entity_an_object(Entity) then
 		info.ObjectProperties = {
-			TextureVariation = object._get_object_texture_variation(Entity)
+			TextureVariation = object.get_object_tint_index(Entity)
 		}
 	end
 	return info
@@ -260,7 +266,7 @@ function menyoo_saver.save_map(...)
 			and not entity.is_entity_attached(Entity)
 			and (not entity.is_entity_a_ped(Entity) or not ped.is_ped_a_player(Entity)) then
 				local info <const> = {Placement = get_properties(Entity)}
-				info.Placement.FrozenPos = entity.is_entity_an_object(Entity)
+				info.Placement.FrozenPos = kek_entity.is_entity_frozen(Entity)
 				xml_string[#xml_string + 1] = essentials.table_to_xml(info, 1, nil, {}, true)
 				local attached_entities <const> = kek_entity.get_all_attached_entities(Entity)
 				for attachment in essentials.entities(attached_entities) do
@@ -280,7 +286,7 @@ function menyoo_saver.save_map(...)
 	xml_string[#xml_string + 1] = ""
 	file:write(table.concat(xml_string, "\n"))
 	file:flush()
-	essentials.msg(lang["Saved map."], "green", true, 6)
+	essentials.msg(lang["Saved map."], "green", 6)
 end
 
 return essentials.const_all(menyoo_saver)

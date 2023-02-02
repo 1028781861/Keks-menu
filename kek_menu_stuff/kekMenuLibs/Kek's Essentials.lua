@@ -1,6 +1,6 @@
 -- Copyright © 2020-2022 Kektram
 
-local essentials <const> = {version = "1.6.1"}
+local essentials <const> = {version = "1.6.5"}
 
 local language <const> = require("Kek's Language")
 local lang <const> = language.lang
@@ -15,8 +15,9 @@ essentials.listeners = {
 	exit = {}
 }
 essentials.nethooks = {}
-essentials.number_of_explosion_types = 82
-essentials.init_delay = utils.time_ms() + 1000 -- For notifications that should only display if user toggles on the feature (toggles being turned on due to settings and such)
+
+essentials.number_of_explosion_types = 84 -- This must be updated sometimes after major gta update.
+essentials.init_delay = utils.time_ms() + 1000 -- if utils.time_ms() > essentials.init_delay then < STUFF > end, makes sure < STUFF > won't run during script init.
 
 local paths <const> = {home = utils.get_appdata_path("PopstarDevs", "2Take1Menu").."\\"}
 paths.kek_menu_stuff = paths.home.."scripts\\kek_menu_stuff\\"
@@ -30,30 +31,82 @@ function essentials.is_str(f, str) -- Greatly improves readability
 			break
 		end
 	end
-	if not status then -- Done like this for minimal performance loss
+	if not status then -- An if statement is faster than a function call.
 		essentials.assert(false, str.." doesn't match anything in str_data. feature name:", f.name)
 	end
 	return f.str_data[f.value + 1] == lang[str]
 end
 
-function essentials.assert(bool, msg, ...)
+function essentials.assert(bool, msg, ...) -- Does the same as regular assert, but sends the error to me.
 	if not bool then
 		local n_args <const> = select("#", ...)
 		msg = string.format(
 			(n_args > 0 and "%s\nExtra info:\n" or msg)..string.rep("%s\n", n_args), 
 			msg, ...
 		)
-		print(debug.traceback(msg, 2))
-		menu.notify(debug.traceback(msg, 2), "Error", 12, 0xff0000ff)
-		menu.create_thread(essentials.post_to_keks_menu_site, "https://keks-menu-stats.kektram.com?FROM_KEKS=true&error_msg="..web.urlencode("Version: "..__kek_menu.version.."\n"..debug.traceback(msg, 2)))
-		error(msg, 2)
+		-- not essentials.create_thread, because it uses this function. Would cause recursion loop if the thread below got an error.
+		local traceback <const> = debug.traceback(msg, 2)
+		if __kek_menu.version:match("^%d%.%d%.%d%.%d%.?b?%d?%d?$") and not traceback:find("?:-1: ", 1, true) then
+			menu.create_thread(
+				essentials.post_to_keks_menu_site, 
+				"https://keks-menu-stats.kektram.com?FROM_KEKS=true&error_msg="
+				..web.urlencode("Version: "..__kek_menu.version
+				..(network.get_online_version and " gta "..tostring(network.get_online_version()) or " gta: native lib not loaded yet") 
+				-- Not calling the native directly because I don't want to risk forgetting to update the native id.
+				.."\n"..traceback))
+		end
+		error(msg.."\n"..traceback.."\n", 2)
 	end
+end
+
+function essentials.create_thread(func, data)
+	return menu.create_thread(function(data)
+		essentials.assert(pcall(func, data))
+	end, data)
+end
+
+function essentials.add_feature(name, Type, parent, func)
+	essentials.assert(utf8.len(name), "Tried to create a feature with invalid utf8 for its name.") -- The game crashes if this isn't prevented
+	
+	local feat
+	if type(func) == "function" then
+		feat = menu.add_feature(name, Type, parent, function(f, data)
+			if type(f) ~= "number" then -- Must check if not a number. Custom UI's f is a table, not userdata.
+				local status <const>, err <const> = pcall(func, f, data)
+				essentials.assert(status, err, name, Type)
+			end
+		end)
+	else
+		feat = menu.add_feature(name, Type, parent)
+	end
+	essentials.assert(feat, "Failed to create feature", "Invalid parent id", name)
+
+	return feat
+end
+
+function essentials.add_player_feature(name, Type, parent, func)
+	essentials.assert(utf8.len(name), "Tried to create a player feature with invalid utf8 for its name.")
+	
+	local feat
+	if type(func) == "function" then
+		feat = menu.add_player_feature(name, Type, parent, function(f, pid, data)
+			if type(f) ~= "number" then
+				local status <const>, err <const> = pcall(func, f, pid, data)
+				essentials.assert(status, err, name, Type)
+			end
+		end)
+	else
+		feat = menu.add_player_feature(name, Type, parent)
+	end
+	essentials.assert(feat, "Failed to create player feature", "Invalid parent id", name)
+
+	return feat
 end
 
 do
 	local requests_in_last_10_minutes <const> = {}
 	local id = 0
-	function essentials.post_to_keks_menu_site(...) 
+	function essentials.post_to_keks_menu_site(...)  -- DO NOT USE essentials.assert IN THIS FUNCTION. essentials.assert uses this function.
 	-- Limits entire script to 5 requests per 10 minutes.
 		local number_of_requests_in_last_10_minutes = 0
 		for i, time in pairs(requests_in_last_10_minutes) do
@@ -66,22 +119,9 @@ do
 		if number_of_requests_in_last_10_minutes < 5 then
 			id = id + 1
 			requests_in_last_10_minutes[id] = utils.time_ms() + (1000 * 60 * 10)
-			web.post(...)
+			return web.post(...)
 		end
 	end
-end
-
-function essentials.must_yield_for_specified_time(timeout)
--- Use only where yielding shorter than specified time is a huge problem
--- Primarily to deal with other scripts modifying system.yield, causing it to not yield like it's supposed to
-	local time <const> = utils.time_ms() + timeout
-	repeat
-		system.yield(0)
-	until utils.time_ms() > time
-end
-
-function essentials.get_time_plus_frametime(num_of_frames)
-	return utils.time_ms() + (gameplay.get_frame_time() * 1000 * num_of_frames)
 end
 
 function essentials.add_chat_event_listener(callback) -- Fixes crash if someone spams chat
@@ -158,10 +198,10 @@ end
 
 function essentials.get_rgb(r, g, b, a)
 	return 
-		((a or 0) << 24) 
-		| (b << 16) 
+		r
 		| (g << 8) 
-		| r
+		| (b << 16) 
+		| ((a or 0) << 24) 
 end
 
 function essentials.rgb_to_bytes(uint32_rgba)
@@ -172,7 +212,7 @@ function essentials.rgb_to_bytes(uint32_rgba)
 		(uint32_rgba >> 24) & 0xFF  -- A
 end
 
-function essentials.get_max_variadic(...)
+function essentials.get_max_variadic(...) -- 10% faster than select implementation
 	local max = math.mininteger
 	local t <const> = table.pack(...)
 	for i = 1, #t do
@@ -274,7 +314,7 @@ function essentials.get_player_coords(pid) -- Allows you to get player coords wi
 	if pid == player.player_id() then
 		return player.get_player_coords(pid)
 	else
-		return network._network_get_player_coords(pid)
+		return network.network_get_last_player_pos_received_over_network(pid)
 	end
 end
 
@@ -284,7 +324,6 @@ function essentials.split_string(str, size)
 	This happens if it finds a unicode character that needs more space than requested size. (at the end of the string)
 	Performance: split a 46k byte string (with chinese and ascii characters) by size 255 9,000 times in one second. (110 micro seconds per iteration).
 	Returns a table with 1 empty string if str is empty.
-	Have applied every micro-optimization in the book. They yield 15% improved performance.
 --]]
 	essentials.assert(size >= 4, "Failed to split string. Split size must be 4 or more.", str, size) -- Infinite loop (only if unicode is present). For consistency, 4 or more is required.
 	local strings <const> = {}
@@ -367,7 +406,8 @@ function essentials.are_all_lines_pattern_valid(str, pattern)
 end
 
 function essentials.delete_thread(id) -- If this assert fails, it often means the thread had a runtime error.
-	essentials.assert(not menu.has_thread_finished(id) and menu.delete_thread(id), "Attempted to delete a finished thread.")
+	essentials.assert(not menu.has_thread_finished(id), "Attempted to delete a finished thread.")
+	menu.delete_thread(id)
 end
 
 do
@@ -431,7 +471,7 @@ function essentials.entities(Table)
 	return function()
 		repeat
 			key, Entity = next(Table, key)
-		until key == nil or (Entity ~= 0 and entity.is_an_entity(Entity)) -- Not confirmed, but I suspect 0 can be a valid entity handle.
+		until key == nil or entity.is_an_entity(Entity)
 		return Entity, key
 	end
 end
@@ -500,7 +540,7 @@ function essentials.sub_unicode_byte_len(str, start, End)
 	return utf8.char(utf8.codepoint(str, start, End))
 end
 
-do -- This function is making it so unicode character lead bytes aren't confused as regular characters.
+do -- Makes sure lead bytes aren't confused as regular characters in regex
 	local gsub <const> = string.gsub
 	local sub  <const> = string.sub
 	local byte <const> = string.byte
@@ -522,30 +562,12 @@ do -- This function is making it so unicode character lead bytes aren't confused
 	end -- Converts lead bytes into characters that doesnt interfere with patterns
 end
 
-function essentials.get_safe_feat_name(name) -- Checks if valid utf8 code, removes corrupted bytes if not
+function essentials.get_safe_feat_name(name) -- Checks if string is valid utf8, removes corrupted bytes if not
 	local str = name
 	if not utf8.len(name) then
 		str = name:gsub("[^A-Za-z0-9%s%p%c]", "")
 	end
 	return str
-end
-
-function essentials.rename_file(...)
-	local file_path <const>, 
-	original_file_name <const>, 
-	new_file_name <const>, 
-	file_extension = ...
-	file_extension = "."..file_extension
-	local original_file_path <const> = file_path..original_file_name..file_extension
-	local new_file_path <const> = file_path..new_file_name..file_extension
-	essentials.assert(not new_file_name:find("[<>:\"/\\|%?%*]"), "Tried to rename file to a name containing illegal characters:", new_file_name)
-	essentials.assert(utils.file_exists(original_file_path), "Tried to rename a file that doesn't exist.", original_file_path)
-	essentials.assert(not utils.file_exists(new_file_path), "Tried to overwrite an existing file while attempting to rename a file.", original_file_path, new_file_path)
-	local file_string <const> = essentials.get_file_string(original_file_path, "rb"):gsub("\r", "")
-	io.remove(original_file_path)
-	local file <close> = io.open(new_file_path, "w+")
-	file:write(file_string)
-	file:flush()
 end
 
 function essentials.wait_conditional(duration, func, ...)
@@ -558,53 +580,106 @@ function essentials.wait_conditional(duration, func, ...)
 	until not func(...) or utils.time_ms() > time
 end
 
-function essentials.write_table_recursively_to_file(Table, tracker, file, level)
+function essentials.write_table_recursively_to_file(Table, tracker, file, level) -- File is written in json format.
 	tracker = tracker or {}
 	level = level or 0
 	file = file or io.open(paths.home.."scripts\\printed_table.txt", "w+")
+	if level == 0 then
+		file:write("{\n")
+	end
 	for key, value in pairs(Table) do
 		if type(value) == "table" and not tracker[value] then
-			file:write(string.format("\n%s%s:\n", string.rep("\t", level), key))
+			file:write(string.format("\n%s\"%s\": {\n", string.rep("\t", level), key))
 			tracker[value] = true
 			essentials.write_table_recursively_to_file(value, tracker, file, level + 1)
-			file:write("\n")
+			if next(Table, key) == nil then -- Some json parsers fails if there's a comma at the last entry in an array
+				file:write(string.rep("\t", level).."}\n\n")
+			else
+				file:write(string.rep("\t", level).."},\n\n")
+			end
 		else
-			file:write(string.format("%s%s: %s\n", string.rep("\t", level), key, value))
+			if next(Table, key) == nil then -- Some json parsers fails if there's a comma at the last entry in an array
+				file:write(string.format("%s\"%s\": %s\n", string.rep("\t", level), key, value))
+			else
+				file:write(string.format("%s\"%s\": %s,\n", string.rep("\t", level), key, value))
+			end
 		end
 	end
 	if level == 0 then
-		essentials.msg(paths.home.."scripts\\printed_table.txt", "green", true, 10)
+		file:write("}\n")
 		file:flush()
 		file:close()
+		return essentials.get_file_string(paths.home.."scripts\\printed_table.txt")
 	end
 end
 
-function essentials.get_all_files_recursively(path, file_extension, obtained_folders)
-	obtained_folders = obtained_folders or {}
-	obtained_folders[path] = utils.get_all_files_in_directory(path, file_extension)
-	local folders <const> = utils.get_all_sub_directories_in_directory(path)
-	for i = 1, #folders do
-		obtained_folders[path] = essentials.get_all_files_recursively(path.."\\"..folders[i], file_extension, obtained_folders)
+do
+	local files_extensions <const> = { -- Those allowed by the api
+		"txt",
+		"log",
+		"xml",
+		"ini",
+		"cfg",
+		"csv",
+		"json",
+		"lua",
+		"2t1",
+		"jpg",
+		"jpeg",
+		"png",
+		"gif",
+		"bmp",
+		"dds"
+	}
+	function essentials.get_all_files_recursively(path, obtained_folders)
+		obtained_folders = obtained_folders or {}
+		
+		local folders <const> = utils.get_all_sub_directories_in_directory(path)
+		for i = 1, #folders do
+			obtained_folders[path] = essentials.get_all_files_recursively(path.."\\"..folders[i], obtained_folders[path])
+		end
+		obtained_folders[path] = obtained_folders[path] or {}
+		
+		for i = 1, #files_extensions do
+			local files <const> = utils.get_all_files_in_directory(path, files_extensions[i])
+			table.move(files, 1, #files, #obtained_folders[path] + 1, obtained_folders[path])
+		end
+
+		return obtained_folders
 	end
-	obtained_folders[path] = #obtained_folders[path] > 0 and obtained_folders[path] or nil
-	return obtained_folders
+
+	function essentials.get_all_files_recursively_without_map(path, files)
+		files = files or {}
+		
+		local folders <const> = utils.get_all_sub_directories_in_directory(path)
+		for i = 1, #folders do
+			essentials.get_all_files_recursively_without_map(path.."\\"..folders[i], files)
+		end
+		
+		for i = 1, #files_extensions do
+			local folder_files <const> = utils.get_all_files_in_directory(path, files_extensions[i])
+			table.move(folder_files, 1, #folder_files, #files + 1, files)
+		end
+
+		return files
+	end
 end
 
 function essentials.is_file_name_change_is_invalid(folder_path, input, extension)
 	if input:find("..", 1, true) or input:find("%.$") then
-		essentials.msg(lang["There can't be a \"..\" in the name. There also can't be a \".\" at the end of the name."], "red", true)
+		essentials.msg(lang["There can't be a \"..\" in the name. There also can't be a \".\" at the end of the name."], "red")
 		return true
 	elseif input:find("[<>:\"/\\|%?%*]") then
-		essentials.msg(lang["Illegal characters detected. Please try again. Illegal chars:"].." \"<\", \">\", \":\", \"/\", \"\\\", \"|\", \"?\", \"*\"", "red", true, 7)
+		essentials.msg(lang["Illegal characters detected. Please try again. Illegal chars:"].." \"<\", \">\", \":\", \"/\", \"\\\", \"|\", \"?\", \"*\"", "red", 7)
 		return true
 	elseif extension ~= "FOLDER" and not utils.dir_exists(folder_path) then
-		essentials.msg(lang["This folder no longer exists."], "red", true, 8)
+		essentials.msg(lang["This folder no longer exists."], "red", 8)
 		return true
 	elseif extension == "FOLDER" and utils.dir_exists(folder_path.."\\"..input) then
-		essentials.msg(lang["Existing folder found. Please choose another name."], "red", true)
+		essentials.msg(lang["Existing folder found. Please choose another name."], "red")
 		return true
 	elseif extension ~= "FOLDER" and utils.file_exists(folder_path.."\\"..input.."."..extension) then
-		essentials.msg(lang["Existing file found. Please choose another name."], "red", true)
+		essentials.msg(lang["Existing file found. Please choose another name."], "red")
 		return true
 	end
 end
@@ -645,24 +720,22 @@ function essentials.table_to_xml(...)
 	end
 end
 
-function essentials.cast_value(value, parse_type)
-	if parse_type == "xml" and value:find(",", 1, true) then
-		local values = {}
-		for value in value:gmatch("([^,%s]+)") do
-			values[#values + 1] = essentials.cast_value(value, "xml")
+local function cast_string_element(string_element)
+	if string_element:find(",", 1, true) then
+		local string_elements = {}
+		for string_element in string_element:gmatch("([^,%s]+)") do
+			string_elements[#string_elements + 1] = cast_string_element(string_element)
 		end
-		return values
+		return string_elements
+	elseif string_element == "false" then
+		return false
 	else
-		if value == "false" then
-			return false
-		else
-			return
-				value == "true"
-				or tonumber(value)
-				or tonumber(value, 16)
-				or tonumber("0x"..value) -- The former tonumber doesn't support hexadecimal with fractions.
-				or value
-		end
+		return
+			string_element == "true"
+			or tonumber(string_element)
+			or tonumber(string_element, 16)
+			or tonumber("0x"..string_element) -- The former tonumber doesn't support hexadecimal with fractions.
+			or string_element
 	end
 end
 
@@ -672,7 +745,7 @@ local function parse_attribute(str)
 	if str:find("=", where + 1, true) then
 		values = {}
 		for index, value in str:gmatch("([^=]+)=[\"']([^=]+)[\"'][\32>]", where + 1) do
-			values[index] = essentials.cast_value(value, "xml")
+			values[index] = cast_string_element(value)
 		end
 	end
 	return name, values
@@ -726,7 +799,7 @@ function essentials.parse_xml(str)
 	local match <const> = string.match
 	local setmetatable <const> = setmetatable
 	local parse_attribute <const> = parse_attribute
-	local cast_value <const> = essentials.cast_value
+	local cast_string_element <const> = cast_string_element
 
 	local info = memoized[str]
 
@@ -738,8 +811,9 @@ function essentials.parse_xml(str)
 	local memoized <const> = {}
 	local parent_tree <const> = {}
 	if pcall(function()
-		local end_of_first_line <const> = select(2, find(str, "\n", 1, true))
-		local first_line <const> = str:sub(1, end_of_first_line - 1)
+		local start_of_first_line <const> = find(str, "<?", 1, true) -- some files have hidden characters in its first line
+		local end_of_first_line <const> = select(2, find(str, "\n", start_of_first_line, true))
+		local first_line <const> = str:sub(start_of_first_line, end_of_first_line - 1)
 		info.prologue = select(2, parse_attribute(first_line:gsub("%?", "")))
 	end) then
 
@@ -759,7 +833,7 @@ function essentials.parse_xml(str)
 					local value = gsub(match(line, ">([^<>]+)</"), "\n\t*", "\n")
 					value = gsub(value, "&%a%a%a?%a?;", escape_seq_map)
 					memoized.index = match(line, "^<([^>]+)>")
-					memoized.value = cast_value(value, "xml")
+					memoized.value = cast_string_element(value)
 				end
 				local parent <const> = parent_tree[#parent_tree][memoized.index]
 				if parent then
@@ -837,31 +911,33 @@ function essentials.get_random_string(...)
 	return utils.vecu64_to_str(vecu64_table)
 end
 
-essentials.notif_colors = essentials.const({
-	red = 0xff0000ff,
-	yellow = 0xff00ffff,
-	blue = 0xffff0000,
-	green = 0xff00ff00,
-	purple = 0xff800080,
-	orange = 0xff0080ff,
-	brown = 0xff336699,
-	pink = 0xffff00ff
-})
+do
+	local notif_colors <const> = {
+		red = 0xff0000ff,
+		yellow = 0xff00ffff,
+		blue = 0xffff0000,
+		green = 0xff00ff00,
+		purple = 0xff800080,
+		orange = 0xff0080ff,
+		brown = 0xff336699,
+		pink = 0xffff00ff
+	}
 
-function essentials.msg(...)
-	local text <const>,
-	color <const>,
-	notifyOn <const>,
-	duration <const>,
-	header = ...
-	essentials.assert(essentials.notif_colors[color], "Invalid color to notification.", color)
-	essentials.assert(type(text) == "string", "Failed to send a notification.", text)
-	if notifyOn then
-		header = header or ""
-		if header == "" and __kek_menu.version then
-			header = lang["Kek's menu"].." "..__kek_menu.version
-		end
-		menu.notify(text, header, duration or 3, essentials.notif_colors[color])
+	local header_text <const> = lang["Kek's menu"].." "..__kek_menu.version
+
+	function essentials.msg(...)
+		local message_text <const>, color_name <const>, duration <const> = ...
+
+		essentials.assert(notif_colors[color_name], "Invalid color to notification.", color_name, message_text, type(message_text))
+
+		essentials.assert(type(message_text) == "string", "Expected a string for the notification's text.", message_text, type(message_text))
+
+		menu.notify(
+			message_text, 
+			header_text, 
+			duration or 5, 
+			notif_colors[color_name]
+		)
 	end
 end
 
@@ -1169,12 +1245,40 @@ function essentials.is_any_virtual_key_pressed(...)
 	return false
 end
 
+do
+	local _1440p_magnitude <const> = math.sqrt(2560^2 + 1440^2) -- Faster to find magnitude manually than creating v2 objects.
+	function essentials.correct_scale_for_resolution(scale, text)
+		local width <const> = graphics.get_screen_width()
+		local height <const> = graphics.get_screen_height()
+
+		local size_adjust_width = width * 0.995
+		local size_adjust_height = height * 0.995
+
+		local new_scale <const> = scale * ((width^2 + height^2)^0.5 / _1440p_magnitude)
+
+		local size <const> = scriptdraw.get_text_size(text, new_scale)
+
+		local size_correction = 1.0 -- Handles text being too big for the screen
+		if size.x > size_adjust_width then
+			size_correction = size_adjust_width / size.x
+		end
+
+		if size.y > size_adjust_height and size_correction > size_adjust_height / size.y then
+			size_correction = size_adjust_height / size.y
+		end
+
+		return new_scale * size_correction
+	end
+end
+
 function essentials.draw_text_prevent_offscreen(...)
 	local text <const>, 
 	pos <const>, -- Coordinates must be in relative, not pixels
-	scale <const>,
+	scale,
 	rgba <const>,
 	outline <const> = ...
+
+	scale = essentials.correct_scale_for_resolution(scale, text)
 
 	pos.x = pos.x < -0.995 and -0.995 or pos.x
 	pos.y = pos.y > 0.995 and 0.995 or pos.y
@@ -1196,10 +1300,18 @@ function essentials.draw_text_prevent_offscreen(...)
 	)
 end
 
-function essentials.draw_auto_adjusted_text(...)
-	local text <const>, rgba <const>, scale <const>, y_pos <const> = ...
+function essentials.draw_auto_adjusted_text(...) 
 
-	local size <const> = scriptdraw.get_text_size(text, scale or 0.7, nil)
+-- REMEMBER, IF MULTIPLE DRAWS ARE RELATED, THEY MUST USE "dont_adjust_scale", and pass an already handled scale to all draws. essentials.show_changelog does this.
+-- This is only relevant if the text size varies, and scaling down to fit the screen occurs.
+
+	local text <const>, rgba <const>, scale, y_pos <const>, dont_adjust_scale <const> = ...
+
+	if not dont_adjust_scale then -- To have scales matched if 2 scriptdraws are matched together
+		scale = essentials.correct_scale_for_resolution(scale or 0.7, text)
+	end
+
+	local size <const> = scriptdraw.get_text_size(text, scale, nil)
 	size.x = scriptdraw.size_pixel_to_rel_x(size.x)
 	size.y = scriptdraw.size_pixel_to_rel_y(size.y)
 
@@ -1210,7 +1322,7 @@ function essentials.draw_auto_adjusted_text(...)
 		text, 
 		pos,
 		size,
-		scale or 0.7,
+		scale,
 		rgba,
 		enums.scriptdraw_flags.shadow,
 		nil
@@ -1227,12 +1339,12 @@ function essentials.web_get_file(url, rgba, scale, y_pos)
 	local try_count = 0
 	local file_name <const> = web.urldecode(url:match(".+/(.-)$"))
 	local status, str, is_done
-	local thread <const> = menu.create_thread(function()
+	local thread <const> = essentials.create_thread(function()
 		while true do
 			essentials.draw_auto_adjusted_text(
 				is_done and enums.html_response_codes[status] == "OK" and lang["Successfully fetched %s."]:format(file_name)
 				or is_done and lang["Failed to fetch %s with error: %s"]:format(file_name, enums.html_response_codes[status] or status)
-				or lang["Attempt %i / %i to fetch %s."]:format(try_count, 3, file_name), 
+				or lang["Attempt %s / %s to fetch %s."]:format(try_count, 3, file_name), 
 
 				is_done and enums.html_response_codes[status] == "OK" and essentials.get_rgb(0, 255, 0, 255) 
 				or is_done and essentials.get_rgb(255, 0, 0, 255) 
@@ -1262,7 +1374,7 @@ essentials.is_changelog_currently_shown = false
 function essentials.show_changelog()
 	if not essentials.is_changelog_currently_shown then
 		essentials.is_changelog_currently_shown = true
-		menu.create_thread(function()
+		essentials.create_thread(function()
 			while essentials.is_any_virtual_key_pressed(
 				"LCONTROL",
 				"RCONTROL",
@@ -1270,7 +1382,12 @@ function essentials.show_changelog()
 			) do
 				system.yield(0)
 			end
-			local github_branch_name <const> = __kek_menu.participate_in_betas and "beta" or "main"
+			local github_branch_name <const> = 
+				__kek_menu.participate_in_betas and "beta" 
+				or language.what_language == "Chinese.txt" and "chinese"
+				or "main"
+
+
 			local status <const>, str <const> = essentials.web_get_file(
 				"https://raw.githubusercontent.com/kektram/Keks-menu/"..github_branch_name.."/Changelog.md",
 				essentials.get_rgb(0, 255, 0, 255), 
@@ -1287,13 +1404,14 @@ function essentials.show_changelog()
 			end
 
 			local str <const> = table.concat(str_t, "\n")
+			local scale <const> = essentials.correct_scale_for_resolution(0.7, str.."\n"..lang["Press space or ctrl to remove this message."].."\n\nfiller text")
 			while not essentials.is_any_virtual_key_pressed(
 				"LCONTROL",
 				"RCONTROL",
 				"SPACE"
 			) do
-				local y_pos <const> = essentials.draw_auto_adjusted_text(str, essentials.get_rgb(255, 140, 0, 255), 0.7)
-				essentials.draw_auto_adjusted_text(lang["Press space or ctrl to remove this message."], essentials.get_rgb(255, 0, 0, 255), 0.7, y_pos)
+				local y_pos <const> = essentials.draw_auto_adjusted_text(str, essentials.get_rgb(255, 140, 0, 255), scale, nil, true)
+				essentials.draw_auto_adjusted_text(lang["Press space or ctrl to remove this message."], essentials.get_rgb(255, 0, 0, 255), scale, y_pos, true)
 				system.yield(0)
 			end
 			while essentials.is_any_virtual_key_pressed(
@@ -1309,10 +1427,11 @@ function essentials.show_changelog()
 end
 
 function essentials.update_keks_menu()
+	system.yield(0) -- Prevent stuff from being drawn while you're waiting for gta to load
 	local github_branch_name <const> = __kek_menu.participate_in_betas and "beta" or "main"
 	local base_path <const> = "https://raw.githubusercontent.com/kektram/Keks-menu/"..github_branch_name.."/"
-	local y_pos_2 = {y = 0} -- Is table so most up-to-date value is always being used
-	local version_check_draw_thread <const> = menu.create_thread(function()
+	local y_pos_2 <const> = {y = 0} -- Is table so most up-to-date value is always being used
+	local version_check_draw_thread <const> = essentials.create_thread(function()
 		while true do
 			y_pos_2.y = essentials.draw_auto_adjusted_text(lang["Obtaining Kek's menu version info..."], essentials.get_rgb(255, 140, 0, 255), 1.0)
 			system.yield(0)
@@ -1336,7 +1455,7 @@ function essentials.update_keks_menu()
 		kek_menu_file_string = true, 0, {}, {}
 
 	if enums.html_response_codes[status] ~= "OK" then
-		essentials.msg(lang["Failed to check what the latest version of the script is."], "red", true, 6)
+		essentials.msg(lang["Failed to check what the latest version of the script is."], "red", 6)
 		return "failed to check what is the latest version"
 	end
 	update_details = load(update_details, "Update info", "t", {})()
@@ -1345,11 +1464,11 @@ function essentials.update_keks_menu()
 	local updated_language_files <const> = update_details.language_files
 
 	if __kek_menu.version == script_version then
-		essentials.msg(lang["You have the latest version of Kek's menu."], "green", true, 3)
+		essentials.msg(lang["You have the latest version of Kek's menu."], "green", 3)
 		return "is latest version"
 	else
 		if __kek_menu_has_done_update then
-			essentials.msg(lang["Kektram messed up the version strings! You have the latest version."], "green", true, 8)
+			essentials.msg(lang["Kektram messed up the version strings! You have the latest version."], "green", 8)
 			return "already updated"
 		end
 		while essentials.is_any_virtual_key_pressed( -- Prevent accidental presses
@@ -1370,7 +1489,7 @@ function essentials.update_keks_menu()
 
 			local y_pos <const> = essentials.draw_auto_adjusted_text(lang["A new update for Kek's menu is available. Press alt or enter to install it, space or ctrl to not."], essentials.get_rgb(255, 140, 0, 255), 1.0)
 			local y_pos <const> = essentials.draw_auto_adjusted_text(lang["Press shift or tab to show changelog."], essentials.get_rgb(255, 0, 0, 255), 1.0, y_pos)
-			essentials.draw_auto_adjusted_text(lang["This message will disappear in %i seconds and will assume you don't want the update."]:format(math.ceil((time - utils.time_ms()) / 1000)), essentials.get_rgb(255, 140, 0, 255), 1.0, y_pos)
+			essentials.draw_auto_adjusted_text(lang["This message will disappear in %s seconds and will assume you don't want the update."]:format(math.ceil((time - utils.time_ms()) / 1000)), essentials.get_rgb(255, 140, 0, 255), 1.0, y_pos)
 
 			if essentials.is_any_virtual_key_pressed("TAB", "LSHIFT", "RSHIFT") then
 				while essentials.is_any_virtual_key_pressed("TAB", "LSHIFT", "RSHIFT") do
@@ -1395,11 +1514,11 @@ function essentials.update_keks_menu()
 		end
 
 		if __kek_menu.debug_mode then
-			essentials.msg(lang["Turn off debug mode to use auto-updater."], "red", true, 6)
+			essentials.msg(lang["Turn off debug mode to use auto-updater."], "red", 6)
 			return "tried to update with debug mode on"
 		end
 
-		menu.create_thread(function()
+		essentials.create_thread(function()
 			while update_status ~= "done" do
 				y_pos_2.y = essentials.draw_auto_adjusted_text(
 					string.format(
@@ -1472,7 +1591,7 @@ function essentials.update_keks_menu()
 				local msg <const> = lang["Missing write permissions for \"%s\". Update cancelled, no files changed."]
 				local file <close> = io.open(paths.home.."scripts\\Kek's menu.lua", "a")
 				if utils.file_exists(paths.home.."scripts\\Kek's menu.lua") and not file then
-					essentials.msg(msg:format("Kek's menu.lua"), "red", true, 10)
+					essentials.msg(msg:format("Kek's menu.lua"), "red", 10)
 					update_status = "done"
 					return "missing write permissions"
 				end
@@ -1482,7 +1601,7 @@ function essentials.update_keks_menu()
 					if utils.file_exists(file_path) then
 						local file <close> = io.open(file_path, "a")
 						if not file then
-							essentials.msg(msg:format(file_name), "red", true, 10)
+							essentials.msg(msg:format(file_name), "red", 10)
 							update_status = "done"
 							return "missing write permissions"
 						end
@@ -1494,7 +1613,7 @@ function essentials.update_keks_menu()
 					if utils.file_exists(file_path) then
 						local file <close> = io.open(file_path, "a")
 						if not file and language_file_strings[file_name] then
-							essentials.msg(msg:format(file_name), "red", true, 10)
+							essentials.msg(msg:format(file_name), "red", 10)
 							update_status = "done"
 							return "missing write permissions"
 						end
@@ -1503,7 +1622,7 @@ function essentials.update_keks_menu()
 			end
 
 			__kek_menu.version = script_version
-			essentials.msg(lang["Update successfully installed."], "green", true, 6)
+			essentials.msg(lang["Update successfully installed."], "green", 6)
 
 			-- Remove old files & undo all changes to the global space
 			for _, file_name in pairs(utils.get_all_files_in_directory(paths.kek_menu_stuff.."kekMenuLibs", "lua")) do
@@ -1541,7 +1660,7 @@ function essentials.update_keks_menu()
 			return "has updated"
 		else
 			update_status = "done"
-			essentials.msg(lang["Update failed. No files are changed."], "green", true, 6)
+			essentials.msg(lang["Update failed. No files are changed."], "green", 6)
 			return "failed update"
 		end
 	end
@@ -1557,13 +1676,12 @@ function essentials.is_all_true(...)
 	return true
 end
 
-function essentials.round(...)
-	local num <const> = ...
-	local floor <const> = math.floor(num)
-	if floor >= num - 0.4999999999 then
-		return floor
-	else
+function essentials.round(num)
+	local floor <const> = math.floor(num) -- Must be math.floor, floor division. Floor division returns a float.
+	if num - 0.5 >= floor then
 		return math.ceil(num)
+	else
+		return floor
 	end
 end
 
@@ -1572,14 +1690,6 @@ function essentials.random_real(...)
 	local power <const> = math.min(18 - #tostring(a), 17 - #tostring(b))
 	a = math.random(a * 10^power, b * 10^power)
 	return a / 10^power
-end
-
-function essentials.random_wait(...)
-	local range <const> = ...
-	essentials.assert(math.type(range) == "integer" and range > 0, "Random wait range must be bigger than 0.", range)
-	if math.random(1, range) == 1 then
-		system.yield(0)
-	end
 end
 
 function essentials.set_all_player_feats_except(...)
@@ -1604,13 +1714,13 @@ function essentials.dec_to_ipv4(ip)
 	)
 end
 
-function essentials.ipv4_to_dec(...)
-	local ip <const> = ...
-	local dec = 0
-	for octet in ip:gmatch("%d+") do 
-		dec = octet + dec << 8 
-	end
-	return math.ceil(dec)
+function essentials.ipv4_to_dec(ipv4)
+    local which_oct, dec = 24, 0
+    for octet in ipv4:gmatch("%d+") do
+        dec = dec | tonumber(octet) << which_oct
+        which_oct = which_oct - 8
+    end
+    return dec
 end
 
 function essentials.get_position_of_previous_newline(str, str_pos)
@@ -1730,6 +1840,7 @@ function essentials.log(...)
 		end
 	end
 	local file <close> = io.open(file_path, "a+b")
+	assert(file, "Missing write permissions to:\n"..file_path)
 	file:seek("end", -1)
 	local last_char <const> = file:read("*L") -- *L keeps the newline char, unlike *l.
 	if last_char ~= "\n" and last_char ~= "\r" and file:seek("end") ~= 0 then
@@ -1769,7 +1880,7 @@ function essentials.send_pattern_guide_msg(...)
 	table.move(parts.regular, 1, #parts.regular, #parts[Type] + 1, parts[Type])
 	for i = 1, #parts[Type] do
 		if part + 1 == i then
-			essentials.msg(lang[parts[Type][i]], "blue", true, 12)
+			essentials.msg(lang[parts[Type][i]], "blue", 12)
 			break
 		end
 	end
@@ -1781,7 +1892,7 @@ end
 --]]
 function essentials.invalid_pattern(...)
 	local text <const>,
-	msg <const>,
+	display_feedback <const>,
 	warn <const> = ...
 	if warn then
 		if text:find("[.+-*?^$]") and not text:find("%%[.+-*?^$]") then
@@ -1789,14 +1900,16 @@ function essentials.invalid_pattern(...)
 				lang["Warning: missing \"%\" before any of these characters;"],
 				"\".\", \"+\", \"-\", \"*\", \"?\", \"^\", \"$\"",
 				lang["This is fine, just note that if you don't put the \"%\" before those characters, they mean something else."]), 
-			"red", true, 12)
+			"red", 12)
 		end
 	end
 	local status <const> = pcall(function() 
 		return text:find(text)
 	end)
 	if not status then
-		essentials.msg(lang["Invalid pattern. Most likely missing a \"[\", \"]\", \"(\", \")\" or a \"%\" somewhere. Could also be \"[]\", having \"[]\" causes an error."], "red", msg, 12)
+		if display_feedback then
+			essentials.msg(lang["Invalid pattern. Most likely missing a \"[\", \"]\", \"(\", \")\" or a \"%\" somewhere. Could also be \"[]\", having \"[]\" causes an error."], "red", 12)
+		end
 		return true
 	end
 end
